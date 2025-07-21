@@ -11,6 +11,7 @@ import {
   openaiCompatibleModelsSafeParse,
 } from "./create-openai-compatiable";
 import { ChatModel } from "app-types/chat";
+import { getOpenRouterProviderConfig } from "./openrouter";
 
 const ollama = createOllama({
   baseURL: process.env.OLLAMA_BASE_URL || "http://localhost:11434/api",
@@ -51,6 +52,7 @@ const staticModels = {
   },
 };
 
+// Models that do not support tool calling (static)
 const staticUnsupportedModels = new Set([
   staticModels.openai["o4-mini"],
   staticModels.google["gemini-2.0-flash-lite"],
@@ -70,32 +72,99 @@ const {
   unsupportedModels: openaiCompatibleUnsupportedModels,
 } = createOpenAICompatibleModels(openaiCompatibleProviders);
 
-const allModels = { ...openaiCompatibleModels, ...staticModels };
+// --- Dynamic OpenRouter integration ---
+let openRouterDynamicModels: Record<string, LanguageModel> = {};
+let openRouterDynamicUnsupportedModels: Set<LanguageModel> = new Set();
 
-const allUnsupportedModels = new Set([
-  ...openaiCompatibleUnsupportedModels,
-  ...staticUnsupportedModels,
-]);
+async function loadOpenRouterModels() {
+  try {
+    const config = await getOpenRouterProviderConfig();
+    const provider = openrouter;
+    openRouterDynamicModels = {};
+    openRouterDynamicUnsupportedModels = new Set();
 
-export const isToolCallUnsupportedModel = (model: LanguageModel) => {
-  return allUnsupportedModels.has(model);
-};
+    config.models.forEach((m) => {
+      const model = provider(m.apiName);
+      openRouterDynamicModels[m.uiName] = model;
+      if (!m.supportsTools) {
+        openRouterDynamicUnsupportedModels.add(model);
+      }
+    });
+  } catch (_err) {
+    // Error already logged in openrouter.ts
+    openRouterDynamicModels = {};
+    openRouterDynamicUnsupportedModels = new Set();
+  }
+}
 
-const firstProvider = Object.keys(allModels)[0];
-const firstModel = Object.keys(allModels[firstProvider])[0];
+// --- Factory for async model provider ---
+export async function getCustomModelProvider(): Promise<{
+  modelsInfo: {
+    provider: string;
+    models: any[]; // OpenRouter: enhanced, others: { name, isToolCallUnsupported }
+  }[];
+  getModel: (model?: ChatModel) => LanguageModel;
+  isToolCallUnsupportedModel: (model: LanguageModel) => boolean;
+}> {
+  await loadOpenRouterModels();
+  let openRouterMeta: any[] = [];
+  try {
+    const openRouterConfig = await getOpenRouterProviderConfig();
+    openRouterMeta = openRouterConfig.models;
+  } catch {}
 
-const fallbackModel = allModels[firstProvider][firstModel];
+  const allModels = {
+    ...openaiCompatibleModels,
+    ...staticModels,
+    openRouter: {
+      ...staticModels.openRouter,
+      ...openRouterDynamicModels,
+    },
+  };
 
-export const customModelProvider = {
-  modelsInfo: Object.entries(allModels).map(([provider, models]) => ({
-    provider,
-    models: Object.entries(models).map(([name, model]) => ({
-      name,
-      isToolCallUnsupported: isToolCallUnsupportedModel(model),
+  const allUnsupportedModels = new Set([
+    ...openaiCompatibleUnsupportedModels,
+    ...staticUnsupportedModels,
+    ...openRouterDynamicUnsupportedModels,
+  ]);
+
+  const isToolCallUnsupportedModel = (model: LanguageModel) => {
+    return allUnsupportedModels.has(model);
+  };
+
+  const firstProvider = Object.keys(allModels)[0];
+  const firstModel = Object.keys(allModels[firstProvider])[0];
+  const fallbackModel = allModels[firstProvider][firstModel];
+
+  return {
+    modelsInfo: Object.entries(allModels).map(([provider, models]) => ({
+      provider,
+      models: Object.entries(models).map(([name, model]) => {
+        // For OpenRouter, attach enhanced metadata if available
+        if (provider === "openRouter" && openRouterDynamicModels[name]) {
+          const meta = openRouterMeta.find((m) => m.uiName === name);
+          return meta
+            ? {
+                ...meta,
+                name,
+                isToolCallUnsupported: isToolCallUnsupportedModel(model),
+              }
+            : {
+                name,
+                isToolCallUnsupported: isToolCallUnsupportedModel(model),
+              };
+        }
+        // Other providers: keep simple structure
+        return {
+          name,
+          isToolCallUnsupported: isToolCallUnsupportedModel(model),
+        };
+      }),
     })),
-  })),
-  getModel: (model?: ChatModel): LanguageModel => {
-    if (!model) return fallbackModel;
-    return allModels[model.provider]?.[model.model] || fallbackModel;
-  },
-};
+    getModel: (model?: ChatModel): LanguageModel => {
+      if (!model) return fallbackModel;
+      return allModels[model.provider]?.[model.model] || fallbackModel;
+    },
+    isToolCallUnsupportedModel,
+  };
+}

@@ -1,6 +1,6 @@
 import { smoothStream, streamText } from "ai";
 
-import { customModelProvider } from "lib/ai/models";
+import { getCustomModelProvider } from "lib/ai/models";
 import { CREATE_THREAD_TITLE_PROMPT } from "lib/ai/prompts";
 import globalLogger from "logger";
 import { ChatModel } from "app-types/chat";
@@ -39,7 +39,7 @@ export async function POST(request: Request) {
     }
 
     const result = streamText({
-      model: customModelProvider.getModel(chatModel),
+      model: (await getCustomModelProvider()).getModel(chatModel),
       system: CREATE_THREAD_TITLE_PROMPT,
       experimental_transform: smoothStream({ chunking: "word" }),
       prompt: `Based on this user message, create a concise chat title:

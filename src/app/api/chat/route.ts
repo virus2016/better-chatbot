@@ -10,7 +10,7 @@ import {
   Tool,
 } from "ai";
 
-import { customModelProvider, isToolCallUnsupportedModel } from "lib/ai/models";
+import { getCustomModelProvider } from "lib/ai/models";
 
 import { mcpClientsManager } from "lib/ai/mcp/mcp-manager";
 
@@ -77,7 +77,12 @@ export async function POST(request: Request) {
       mentions = [],
     } = chatApiSchemaRequestBodySchema.parse(json);
 
-    const model = customModelProvider.getModel(chatModel);
+    // Resolve model provider asynchronously
+    const provider = await getCustomModelProvider();
+    const model = provider.getModel(chatModel);
+    const isToolCallUnsupportedModel = provider.isToolCallUnsupportedModel
+      ? provider.isToolCallUnsupportedModel
+      : (_m) => false;
 
     let thread = await chatRepository.selectThreadDetails(id);
 
