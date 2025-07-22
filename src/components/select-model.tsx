@@ -28,6 +28,7 @@ import { GeminiIcon } from "ui/gemini-icon";
 import { GrokIcon } from "ui/grok-icon";
 import { OpenAIIcon } from "ui/openai-icon";
 import { OpenRouterIcon } from "ui/openrouter-icon";
+import { OllamaIcon } from "ui/ollama-icon";
 
 interface SelectModelProps {
   onSelect: (model: ChatModel) => void;
@@ -96,6 +97,8 @@ export const SelectModel = (props: PropsWithChildren<SelectModelProps>) => {
                     <GeminiIcon className="size-4" />
                   ) : model.provider === "openrouter" ? (
                     <OpenRouterIcon className="size-4" />
+                  ) : model.provider === "ollama" ? (
+                    <OllamaIcon className="size-4" />
                   ) : null}
                 </div>
               )}
@@ -270,11 +273,13 @@ export const SelectModel = (props: PropsWithChildren<SelectModelProps>) => {
                                               context
                                             </span>
                                           )}
-                                          {item.pricing?.prompt && (
+                                          {item.pricing && (
                                             <span className="flex items-center gap-1">
                                               <span className="w-1 h-1 rounded-full bg-current" />
-                                              ${item.pricing.prompt}/
-                                              {item.pricing.unit || "1K"}
+                                              {item.pricing.prompt === 0 &&
+                                              item.pricing.unit === "free"
+                                                ? "Free"
+                                                : `$${item.pricing.prompt}/${item.pricing.unit || "1K"}`}
                                             </span>
                                           )}
                                         </div>
@@ -288,23 +293,24 @@ export const SelectModel = (props: PropsWithChildren<SelectModelProps>) => {
                                               ? `${item.description.slice(0, 80)}...`
                                               : item.description}
                                           </p>
-                                          {item.description.length > 80 && (
-                                            <button
-                                              onClick={(e) => {
-                                                e.stopPropagation();
-                                                // For OpenRouter models, we could link to their model page
-                                                // For now, just show the full description in a tooltip or modal
-                                                window.open(
-                                                  `https://openrouter.ai/models/${item.name}`,
-                                                  "_blank",
-                                                );
-                                              }}
-                                              className="inline-flex items-center gap-1 mt-1 text-primary hover:underline"
-                                            >
-                                              More details
-                                              <ExternalLink className="size-3" />
-                                            </button>
-                                          )}
+                                          {item.description.length > 80 &&
+                                            provider.provider ===
+                                              "openRouter" && (
+                                              <button
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  // For OpenRouter models, link to their model page
+                                                  window.open(
+                                                    `https://openrouter.ai/models/${item.name}`,
+                                                    "_blank",
+                                                  );
+                                                }}
+                                                className="inline-flex items-center gap-1 mt-1 text-primary hover:underline"
+                                              >
+                                                More details
+                                                <ExternalLink className="size-3" />
+                                              </button>
+                                            )}
                                         </div>
                                       )}
                                     </div>
@@ -349,6 +355,8 @@ const ProviderHeader = memo(function ProviderHeader({
           <GeminiIcon className="size-4" />
         ) : provider === "openrouter" ? (
           <OpenRouterIcon className="size-4" />
+        ) : provider === "ollama" ? (
+          <OllamaIcon className="size-4" />
         ) : null}
         <h3 className="font-semibold text-sm capitalize text-foreground">
           {provider === "openai"
@@ -361,7 +369,9 @@ const ProviderHeader = memo(function ProviderHeader({
                   ? "Google"
                   : provider === "openrouter"
                     ? "OpenRouter"
-                    : provider}
+                    : provider === "ollama"
+                      ? "Ollama"
+                      : provider}
         </h3>
       </div>
       {count !== undefined && (

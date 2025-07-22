@@ -12,8 +12,9 @@ import {
 } from "./create-openai-compatiable";
 import { ChatModel } from "app-types/chat";
 import { getOpenRouterProviderConfig } from "./openrouter";
+import { getOllamaProviderConfig } from "./ollama";
 
-const ollama = createOllama({
+const _ollama = createOllama({
   baseURL: process.env.OLLAMA_BASE_URL || "http://localhost:11434/api",
 });
 
@@ -42,13 +43,13 @@ const staticModels = {
     "grok-3-mini": xai("grok-3-mini-latest"),
   },
   ollama: {
-    "gemma3:1b": ollama("gemma3:1b"),
-    "gemma3:4b": ollama("gemma3:4b"),
-    "gemma3:12b": ollama("gemma3:12b"),
+    // "gemma3:1b": ollama("gemma3:1b"),
+    // "gemma3:4b": ollama("gemma3:4b"),
+    // "gemma3:12b": ollama("gemma3:12b"),
   },
   openRouter: {
-    "qwen3-8b:free": openrouter("qwen/qwen3-8b:free"),
-    "qwen3-14b:free": openrouter("qwen/qwen3-14b:free"),
+    // "qwen3-8b:free": openrouter("qwen/qwen3-8b:free"),
+    // "qwen3-14b:free": openrouter("qwen/qwen3-14b:free"),
   },
 };
 
@@ -56,11 +57,11 @@ const staticModels = {
 const staticUnsupportedModels = new Set([
   staticModels.openai["o4-mini"],
   staticModels.google["gemini-2.0-flash-lite"],
-  staticModels.ollama["gemma3:1b"],
-  staticModels.ollama["gemma3:4b"],
-  staticModels.ollama["gemma3:12b"],
-  staticModels.openRouter["qwen3-8b:free"],
-  staticModels.openRouter["qwen3-14b:free"],
+  // staticModels.ollama["gemma3:1b"],
+  // staticModels.ollama["gemma3:4b"],
+  // staticModels.ollama["gemma3:12b"],
+  // staticModels.openRouter["qwen3-8b:free"],
+  // staticModels.openRouter["qwen3-14b:free"],
 ]);
 
 const openaiCompatibleProviders = openaiCompatibleModelsSafeParse(
@@ -75,6 +76,10 @@ const {
 // --- Dynamic OpenRouter integration ---
 let openRouterDynamicModels: Record<string, LanguageModel> = {};
 let openRouterDynamicUnsupportedModels: Set<LanguageModel> = new Set();
+
+// --- Dynamic Ollama integration ---
+let ollamaDynamicModels: Record<string, LanguageModel> = {};
+let ollamaDynamicUnsupportedModels: Set<LanguageModel> = new Set();
 
 async function loadOpenRouterModels() {
   try {
@@ -97,20 +102,59 @@ async function loadOpenRouterModels() {
   }
 }
 
+async function loadOllamaModels() {
+  try {
+    console.info("[Ollama] Calling getOllamaProviderConfig...");
+    const config = await getOllamaProviderConfig();
+    console.info("[Ollama] Provider config received", config);
+
+    const provider = createOllama({
+      baseURL: config.baseUrl + "/api",
+    });
+    ollamaDynamicModels = {};
+    ollamaDynamicUnsupportedModels = new Set();
+
+    config.models.forEach((m) => {
+      console.info(`[Ollama] Registering model: ${m.apiName}`);
+      const model = provider(m.apiName);
+      ollamaDynamicModels[m.uiName] = model;
+      if (!m.supportsTools) {
+        ollamaDynamicUnsupportedModels.add(model);
+      }
+    });
+    console.info("[Ollama] ollamaDynamicModels", ollamaDynamicModels);
+    console.info(
+      "[Ollama] ollamaDynamicUnsupportedModels",
+      ollamaDynamicUnsupportedModels,
+    );
+  } catch (_err) {
+    console.error("[Ollama] Error in loadOllamaModels", _err);
+    // Error already logged in ollama.ts
+    ollamaDynamicModels = {};
+    ollamaDynamicUnsupportedModels = new Set();
+  }
+}
+
 // --- Factory for async model provider ---
 export async function getCustomModelProvider(): Promise<{
   modelsInfo: {
     provider: string;
-    models: any[]; // OpenRouter: enhanced, others: { name, isToolCallUnsupported }
+    models: any[]; // OpenRouter/Ollama: enhanced, others: { name, isToolCallUnsupported }
   }[];
   getModel: (model?: ChatModel) => LanguageModel;
   isToolCallUnsupportedModel: (model: LanguageModel) => boolean;
 }> {
   await loadOpenRouterModels();
+  await loadOllamaModels();
   let openRouterMeta: any[] = [];
+  let ollamaMeta: any[] = [];
   try {
     const openRouterConfig = await getOpenRouterProviderConfig();
     openRouterMeta = openRouterConfig.models;
+  } catch {}
+  try {
+    const ollamaConfig = await getOllamaProviderConfig();
+    ollamaMeta = ollamaConfig.models;
   } catch {}
 
   const allModels = {
@@ -120,12 +164,17 @@ export async function getCustomModelProvider(): Promise<{
       ...staticModels.openRouter,
       ...openRouterDynamicModels,
     },
+    ollama: {
+      ...staticModels.ollama,
+      ...ollamaDynamicModels,
+    },
   };
 
   const allUnsupportedModels = new Set([
     ...openaiCompatibleUnsupportedModels,
     ...staticUnsupportedModels,
     ...openRouterDynamicUnsupportedModels,
+    ...ollamaDynamicUnsupportedModels,
   ]);
 
   const isToolCallUnsupportedModel = (model: LanguageModel) => {
@@ -143,6 +192,20 @@ export async function getCustomModelProvider(): Promise<{
         // For OpenRouter, attach enhanced metadata if available
         if (provider === "openRouter" && openRouterDynamicModels[name]) {
           const meta = openRouterMeta.find((m) => m.uiName === name);
+          return meta
+            ? {
+                ...meta,
+                name,
+                isToolCallUnsupported: isToolCallUnsupportedModel(model),
+              }
+            : {
+                name,
+                isToolCallUnsupported: isToolCallUnsupportedModel(model),
+              };
+        }
+        // For Ollama, attach enhanced metadata if available
+        if (provider === "ollama" && ollamaDynamicModels[name]) {
+          const meta = ollamaMeta.find((m) => m.uiName === name);
           return meta
             ? {
                 ...meta,
