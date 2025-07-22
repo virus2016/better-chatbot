@@ -1,17 +1,15 @@
 "use client";
-import useSWR, { SWRConfiguration } from "swr";
+import { api } from "@/utils/trpc";
 import { appStore } from "@/app/store";
-import { fetcher } from "lib/utils";
 
-export function useWorkflowToolList(options?: SWRConfiguration) {
-  return useSWR("/api/workflow/tools", fetcher, {
-    errorRetryCount: 0,
-    revalidateOnFocus: false,
-    focusThrottleInterval: 1000 * 60 * 30,
-    fallbackData: [],
+export function useWorkflowToolList(enabled: boolean = true) {
+  return api.workflow.getTools.useQuery(undefined, {
+    retry: false,
+    refetchOnWindowFocus: false,
+    staleTime: 1000 * 60 * 30, // 30 minutes
+    enabled,
     onSuccess: (data) => {
       appStore.setState({ workflowToolList: data });
     },
-    ...options,
   });
 }

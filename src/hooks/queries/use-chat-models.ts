@@ -1,6 +1,5 @@
 import { appStore } from "@/app/store";
-import { fetcher } from "lib/utils";
-import useSWR from "swr";
+import { api } from "@/utils/trpc";
 
 export type EnhancedModel = {
   name: string;
@@ -13,16 +12,9 @@ export type EnhancedModel = {
 };
 
 export const useChatModels = () => {
-  return useSWR<
-    {
-      provider: string;
-      models: EnhancedModel[];
-    }[]
-  >("/api/chat/models", fetcher, {
-    dedupingInterval: 60_000, // 1 minute for fresher data
-    revalidateOnFocus: false,
-    revalidateIfStale: true,
-    fallbackData: [],
+  return api.chat.getModels.useQuery(undefined, {
+    staleTime: 60_000, // 1 minute for fresher data
+    refetchOnWindowFocus: false,
     onSuccess: (data) => {
       const status = appStore.getState();
       if (!status.chatModel) {

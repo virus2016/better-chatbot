@@ -13,6 +13,22 @@ See the experience in action in the [preview](#preview) below!
 
 > Built with [Vercel AI SDK](https://sdk.vercel.ai) and [Next.js](https://nextjs.org/), this app adopts modern patterns for building AI chat interfaces. It leverages the power of the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/introduction) to seamlessly integrate external tools into your chat experience. You can also create custom workflows that become callable tools in chat, allowing you to chain multiple MCP tools, LLM interactions, and logic into powerful automated sequences.
 
+### 🔥 tRPC Integration
+
+This project uses [tRPC v11](https://trpc.io/) for type-safe API communication with full-stack TypeScript support:
+
+- **HTTP & WebSocket Support**: Seamless switching between HTTP batch requests and WebSocket subscriptions
+- **End-to-End Type Safety**: Shared types between client and server with automatic inference
+- **Real-time Features**: WebSocket subscriptions for live chat updates and notifications
+- **Superjson Transformer**: Automatic serialization of complex types like Dates and BigInt
+
+For development with WebSocket support:
+```bash
+pnpm dev:ws  # Starts Next.js with WebSocket server on port 3001
+```
+
+Visit `/trpc-test` to test the tRPC integration and WebSocket subscriptions.
+
 ### Quick Start 🚀
 
 ```bash
