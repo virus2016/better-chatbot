@@ -1,19 +1,17 @@
 "use client";
 import { appStore } from "@/app/store";
-import useSWR, { SWRConfiguration } from "swr";
+import { api } from "@/utils/trpc";
 import { handleErrorWithToast } from "ui/shared-toast";
-import { fetcher } from "lib/utils";
 
-export function useMcpList(options?: SWRConfiguration) {
-  return useSWR("/api/mcp/list", fetcher, {
-    revalidateOnFocus: false,
-    errorRetryCount: 0,
-    focusThrottleInterval: 1000 * 60 * 5,
-    fallbackData: [],
+export function useMcpList(enabled: boolean = true) {
+  return api.mcp.getList.useQuery(undefined, {
+    refetchOnWindowFocus: false,
+    retry: false,
+    staleTime: 1000 * 60 * 5, // 5 minutes
+    enabled,
     onError: handleErrorWithToast,
     onSuccess: (data) => {
       appStore.setState({ mcpList: data });
     },
-    ...options,
   });
 }

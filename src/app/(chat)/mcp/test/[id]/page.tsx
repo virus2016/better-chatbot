@@ -2,7 +2,6 @@
 
 import {
   callMcpToolAction,
-  selectMcpClientAction,
 } from "@/app/api/mcp/actions";
 import {
   ArrowLeft,
@@ -15,7 +14,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import useSWR from "swr";
+import { api } from "@/utils/trpc";
 import {
   PropsWithChildren,
   useEffect,
@@ -395,9 +394,7 @@ export default function Page() {
   const [isCallLoading, setIsCallLoading] = useState(false);
   const [showInputSchema, setShowInputSchema] = useState(false);
 
-  const { data: client, isLoading } = useSWR(`/mcp/${id}`, () =>
-    selectMcpClientAction(id as string),
-  );
+  const { data: client, isLoading } = api.mcp.getClient.useQuery({ id });
 
   const filteredTools = useMemo(() => {
     const trimmedQuery = searchQuery.trim().toLowerCase();
