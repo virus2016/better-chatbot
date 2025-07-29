@@ -47,7 +47,12 @@ import { TextShimmer } from "ui/text-shimmer";
 import equal from "lib/equal";
 import { isVercelAIWorkflowTool } from "app-types/workflow";
 import { Avatar, AvatarFallback, AvatarImage } from "ui/avatar";
-import { DefaultToolName } from "lib/ai/tools";
+import { DefaultToolName, SequentialThinkingToolName } from "lib/ai/tools";
+import {
+  Shortcut,
+  getShortcutKeyList,
+  isShortcutEvent,
+} from "lib/keyboard-shortcuts";
 
 import { WorkflowInvocation } from "./tool-invocation/workflow-invocation";
 import dynamic from "next/dynamic";
@@ -396,7 +401,20 @@ export const AssistMessagePart = memo(function AssistMessagePart({
   );
 });
 AssistMessagePart.displayName = "AssistMessagePart";
-
+const variants = {
+  collapsed: {
+    height: 0,
+    opacity: 0,
+    marginTop: 0,
+    marginBottom: 0,
+  },
+  expanded: {
+    height: "auto",
+    opacity: 1,
+    marginTop: "1rem",
+    marginBottom: "0.5rem",
+  },
+};
 export const ReasoningPart = memo(function ReasoningPart({
   reasoning,
   isThinking,
@@ -405,21 +423,6 @@ export const ReasoningPart = memo(function ReasoningPart({
   isThinking?: boolean;
 }) {
   const [isExpanded, setIsExpanded] = useState(isThinking);
-
-  const variants = {
-    collapsed: {
-      height: 0,
-      opacity: 0,
-      marginTop: 0,
-      marginBottom: 0,
-    },
-    expanded: {
-      height: "auto",
-      opacity: 1,
-      marginTop: "1rem",
-      marginBottom: "0.5rem",
-    },
-  };
 
   useEffect(() => {
     if (!isThinking && isExpanded) {
@@ -526,6 +529,34 @@ const CodeExecutor = dynamic(
   },
 );
 
+const SequentialThinkingToolInvocation = dynamic(
+  () =>
+    import("./tool-invocation/sequential-thinking").then(
+      (mod) => mod.SequentialThinkingToolInvocation,
+    ),
+  {
+    ssr: false,
+    loading,
+  },
+);
+
+// Local shortcuts for tool invocation approval/rejection
+const approveToolInvocationShortcut: Shortcut = {
+  description: "approveToolInvocation",
+  shortcut: {
+    key: "Enter",
+    command: true,
+  },
+};
+
+const rejectToolInvocationShortcut: Shortcut = {
+  description: "rejectToolInvocation",
+  shortcut: {
+    key: "Escape",
+    command: true,
+  },
+};
+
 export const ToolMessagePart = memo(
   ({
     part,
@@ -544,6 +575,34 @@ export const ToolMessagePart = memo(
     const { copied: copiedInput, copy: copyInput } = useCopy();
     const { copied: copiedOutput, copy: copyOutput } = useCopy();
     const [isDeleting, setIsDeleting] = useState(false);
+
+    // Handle keyboard shortcuts for approve/reject actions
+    useEffect(() => {
+      // Only enable shortcuts when manual tool invocation buttons are shown
+      if (!onPoxyToolCall || !isManualToolInvocation || !isLast) return;
+
+      const handleKeyDown = (e: KeyboardEvent) => {
+        const isApprove = isShortcutEvent(e, approveToolInvocationShortcut);
+        const isReject = isShortcutEvent(e, rejectToolInvocationShortcut);
+
+        if (!isApprove && !isReject) return;
+
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+
+        if (isApprove) {
+          onPoxyToolCall({ action: "manual", result: true });
+        }
+
+        if (isReject) {
+          onPoxyToolCall({ action: "manual", result: false });
+        }
+      };
+
+      window.addEventListener("keydown", handleKeyDown);
+      return () => window.removeEventListener("keydown", handleKeyDown);
+    }, [onPoxyToolCall, isManualToolInvocation, isLast]);
 
     const deleteMessage = useCallback(() => {
       safe(() => setIsDeleting(true))
@@ -608,6 +667,7 @@ export const ToolMessagePart = memo(
         return (
           <CodeExecutor
             part={toolInvocation}
+            key={toolInvocation.toolCallId}
             onResult={onToolCallDirect}
             type="javascript"
           />
@@ -618,8 +678,18 @@ export const ToolMessagePart = memo(
         return (
           <CodeExecutor
             part={toolInvocation}
+            key={toolInvocation.toolCallId}
             onResult={onToolCallDirect}
             type="python"
+          />
+        );
+      }
+
+      if (toolName === SequentialThinkingToolName) {
+        return (
+          <SequentialThinkingToolInvocation
+            key={toolInvocation.toolCallId}
+            part={toolInvocation}
           />
         );
       }
@@ -793,29 +863,41 @@ export const ToolMessagePart = memo(
                   </div>
                 )}
 
-                {onPoxyToolCall && isManualToolInvocation && (
+                {onPoxyToolCall && isManualToolInvocation && isLast && (
                   <div className="flex flex-row gap-2 items-center mt-2">
                     <Button
                       variant="secondary"
                       size="sm"
-                      className="rounded-full text-xs hover:ring"
+                      className="rounded-full text-xs hover:ring py-2"
                       onClick={() =>
                         onPoxyToolCall({ action: "manual", result: true })
                       }
                     >
                       <Check />
                       {t("Common.approve")}
+                      <Separator orientation="vertical" className="h-4" />
+                      <span className="text-muted-foreground">
+                        {getShortcutKeyList(approveToolInvocationShortcut).join(
+                          " ",
+                        )}
+                      </span>
                     </Button>
                     <Button
                       variant="outline"
                       size="sm"
-                      className="rounded-full text-xs"
+                      className="rounded-full text-xs py-2"
                       onClick={() =>
                         onPoxyToolCall({ action: "manual", result: false })
                       }
                     >
                       <X />
                       {t("Common.reject")}
+                      <Separator orientation="vertical" />
+                      <span className="text-muted-foreground">
+                        {getShortcutKeyList(rejectToolInvocationShortcut).join(
+                          " ",
+                        )}
+                      </span>
                     </Button>
                   </div>
                 )}
