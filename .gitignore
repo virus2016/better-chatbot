@@ -54,5 +54,5 @@ local-data
 *.ignore
 .mcp-config.json
 openai-compatible.config.ts
-logs/.54a04617b08538d83f51d4388b42605b4df141ce-audit.json
-logs/mcp-puppeteer-2025-07-25.log
+logs/
+certificates

@@ -141,7 +141,7 @@ export class Locker {
   private resolve?: () => void;
 
   get isLocked() {
-    return this.resolve != null;
+    return !!this.resolve;
   }
 
   lock() {
@@ -396,4 +396,13 @@ export function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
         reject(err);
       });
   });
+}
+
+export function parseEnvBoolean(value: string | boolean | undefined): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const lowerVal = value.toLowerCase();
+    return lowerVal === "true" || lowerVal === "1" || lowerVal === "y";
+  }
+  return false;
 }
