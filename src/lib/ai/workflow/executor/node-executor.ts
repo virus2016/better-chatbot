@@ -126,6 +126,7 @@ export const llmNodeExecutor: NodeExecutor<LLMNodeData> = async ({
     messages,
     schema: jsonSchemaToZod(node.outputSchema.properties.answer),
     maxRetries: 3,
+    providerOptions: { ollama: { think: true } },
   });
 
   return {

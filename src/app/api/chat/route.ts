@@ -228,6 +228,8 @@ export async function POST(request: Request) {
         );
         logger.info(`model: ${chatModel?.provider}/${chatModel?.model}`);
 
+        logger.info(model);
+
         const result = streamText({
           model,
           system: systemPrompt,
@@ -237,6 +239,7 @@ export async function POST(request: Request) {
           experimental_transform: smoothStream({ chunking: "word" }),
           maxRetries: 2,
           tools: vercelAITooles,
+          providerOptions: { ollama: { think: true } },
           toolChoice: "auto",
           abortSignal: request.signal,
           onFinish: async ({ response, usage }) => {

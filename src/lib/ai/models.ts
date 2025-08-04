@@ -1,5 +1,5 @@
 // models.ts
-import { createOllama } from "ollama-ai-provider";
+import { createOllama } from "ollama-ai-provider-v2";
 import { openai } from "@ai-sdk/openai";
 import { google } from "@ai-sdk/google";
 import { anthropic } from "@ai-sdk/anthropic";
@@ -111,6 +111,18 @@ async function loadOllamaModels() {
     const provider = createOllama({
       baseURL: config.baseUrl + "/api",
     });
+
+    //   OllamaChatLanguageModel {                                                                                                                           better-chatbot 5:56:34 PM
+    // modelId: 'qwen3:14b',
+    // settings: {},
+    // config:
+    //  { baseURL: 'http://localhost:11434/api',
+    //    fetch: undefined,
+    //    headers: [Function: getHeaders],
+    //    provider: 'ollama.chat' },
+    // specificationVersion: 'v1',
+    // defaultObjectGenerationMode: 'json',
+    // supportsImageUrls: false }
     ollamaDynamicModels = {};
     ollamaDynamicUnsupportedModels = new Set();
 

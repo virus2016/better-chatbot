@@ -43,6 +43,7 @@ export async function POST(request: Request) {
           system: CREATE_THREAD_TITLE_PROMPT,
           experimental_transform: smoothStream({ chunking: "word" }),
           prompt: message,
+          providerOptions: { ollama: { think: true } },
           abortSignal: request.signal,
           onFinish: (ctx) => {
             logger.debug(`onFinish`, ctx.text);
