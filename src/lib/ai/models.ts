@@ -13,6 +13,7 @@ import {
 import { ChatModel } from "app-types/chat";
 import { getOpenRouterProviderConfig } from "./openrouter";
 import { getOllamaProviderConfig } from "./ollama";
+import { getOpenAIProviderConfig } from "./openai";
 
 const _ollama = createOllama({
   baseURL: process.env.OLLAMA_BASE_URL || "http://localhost:11434/api",
@@ -76,6 +77,10 @@ const {
 // --- Dynamic OpenRouter integration ---
 let openRouterDynamicModels: Record<string, LanguageModel> = {};
 let openRouterDynamicUnsupportedModels: Set<LanguageModel> = new Set();
+
+// --- Dynamic OpenAI integration ---
+let openaiDynamicModels: Record<string, LanguageModel> = {};
+let openaiDynamicUnsupportedModels: Set<LanguageModel> = new Set();
 
 // --- Dynamic Ollama integration ---
 let ollamaDynamicModels: Record<string, LanguageModel> = {};
@@ -147,22 +152,59 @@ async function loadOllamaModels() {
   }
 }
 
+async function loadOpenAIModels() {
+  try {
+    console.info("[OpenAI] Calling getOpenAIProviderConfig...");
+    const config = await getOpenAIProviderConfig();
+    console.info("[OpenAI] Provider config received", config);
+
+    const provider = openai;
+    openaiDynamicModels = {};
+    openaiDynamicUnsupportedModels = new Set();
+
+    config.models.forEach((m) => {
+      console.info(`[OpenAI] Registering model: ${m.apiName}`);
+      const model = provider(m.apiName);
+      openaiDynamicModels[m.uiName] = model;
+      if (!m.supportsTools) {
+        openaiDynamicUnsupportedModels.add(model);
+      }
+    });
+    console.info("[OpenAI] openaiDynamicModels", openaiDynamicModels);
+    console.info(
+      "[OpenAI] openaiDynamicUnsupportedModels",
+      openaiDynamicUnsupportedModels,
+    );
+  } catch (_err) {
+    console.error("[OpenAI] Error in loadOpenAIModels", _err);
+    // Error already logged in openai.ts
+    openaiDynamicModels = {};
+    openaiDynamicUnsupportedModels = new Set();
+  }
+}
+
 // --- Factory for async model provider ---
 export async function getCustomModelProvider(): Promise<{
   modelsInfo: {
     provider: string;
-    models: any[]; // OpenRouter/Ollama: enhanced, others: { name, isToolCallUnsupported }
+    models: any[]; // OpenRouter/Ollama/OpenAI: enhanced, others: { name, isToolCallUnsupported }
   }[];
   getModel: (model?: ChatModel) => LanguageModel;
   isToolCallUnsupportedModel: (model: LanguageModel) => boolean;
 }> {
   await loadOpenRouterModels();
+  await loadOpenAIModels();
   await loadOllamaModels();
   let openRouterMeta: any[] = [];
+  let openaiMeta: any[] = [];
   let ollamaMeta: any[] = [];
   try {
     const openRouterConfig = await getOpenRouterProviderConfig();
     openRouterMeta = openRouterConfig.models;
+  } catch {}
+  try {
+    const openaiConfig = await getOpenAIProviderConfig();
+    openaiMeta = openaiConfig.models;
   } catch {}
   try {
     const ollamaConfig = await getOllamaProviderConfig();
@@ -172,6 +214,10 @@ export async function getCustomModelProvider(): Promise<{
   const allModels = {
     ...openaiCompatibleModels,
     ...staticModels,
+    openai: {
+      ...staticModels.openai,
+      ...openaiDynamicModels,
+    },
     openRouter: {
       ...staticModels.openRouter,
       ...openRouterDynamicModels,
@@ -185,6 +231,7 @@ export async function getCustomModelProvider(): Promise<{
   const allUnsupportedModels = new Set([
     ...openaiCompatibleUnsupportedModels,
     ...staticUnsupportedModels,
+    ...openaiDynamicUnsupportedModels,
     ...openRouterDynamicUnsupportedModels,
     ...ollamaDynamicUnsupportedModels,
   ]);
@@ -201,6 +248,20 @@ export async function getCustomModelProvider(): Promise<{
     modelsInfo: Object.entries(allModels).map(([provider, models]) => ({
       provider,
       models: Object.entries(models).map(([name, model]) => {
+        // For OpenAI, attach enhanced metadata if available
+        if (provider === "openai" && openaiDynamicModels[name]) {
+          const meta = openaiMeta.find((m) => m.uiName === name);
+          return meta
+            ? {
+                ...meta,
+                name,
+                isToolCallUnsupported: isToolCallUnsupportedModel(model),
+              }
+            : {
+                name,
+                isToolCallUnsupported: isToolCallUnsupportedModel(model),
+              };
+        }
         // For OpenRouter, attach enhanced metadata if available
         if (provider === "openRouter" && openRouterDynamicModels[name]) {
           const meta = openRouterMeta.find((m) => m.uiName === name);
