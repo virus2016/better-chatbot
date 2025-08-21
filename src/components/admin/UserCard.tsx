@@ -6,7 +6,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "ui/avatar";
 import {
   Mail,
   Calendar,
-  MapPin,
+  // MapPin,
   CheckCircle,
   XCircle,
   User,
