@@ -5,6 +5,7 @@ import {
   ThemeProvider,
   ThemeStyleProvider,
 } from "@/components/layouts/theme-provider";
+import { TRPCProvider } from "@/components/layouts/trpc-provider";
 import { Toaster } from "ui/sonner";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale } from "next-intl/server";
@@ -45,12 +46,14 @@ export default async function RootLayout({
           disableTransitionOnChange
         >
           <ThemeStyleProvider>
-            <NextIntlClientProvider>
-              <div id="root">
-                {children}
-                <Toaster richColors />
-              </div>
-            </NextIntlClientProvider>
+            <TRPCProvider>
+              <NextIntlClientProvider>
+                <div id="root">
+                  {children}
+                  <Toaster richColors />
+                </div>
+              </NextIntlClientProvider>
+            </TRPCProvider>
           </ThemeStyleProvider>
         </ThemeProvider>
       </body>

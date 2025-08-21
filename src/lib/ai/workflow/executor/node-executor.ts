@@ -1,4 +1,4 @@
-import { customModelProvider } from "lib/ai/models";
+import { getCustomModelProvider } from "lib/ai/models";
 import {
   ConditionNodeData,
   OutputNodeData,
@@ -86,7 +86,8 @@ export const llmNodeExecutor: NodeExecutor<LLMNodeData> = async ({
   node,
   state,
 }) => {
-  const model = customModelProvider.getModel(node.model);
+  const provider = await getCustomModelProvider();
+  const model = provider.getModel(node.model);
 
   // Convert TipTap JSON messages to AI SDK format, resolving mentions to actual data
   const messages: Omit<Message, "id">[] = node.messages.map((message) =>
@@ -125,6 +126,7 @@ export const llmNodeExecutor: NodeExecutor<LLMNodeData> = async ({
     messages,
     schema: jsonSchemaToZod(node.outputSchema.properties.answer),
     maxRetries: 3,
+    providerOptions: { ollama: { think: true } },
   });
 
   return {
@@ -209,8 +211,9 @@ export const toolNodeExecutor: NodeExecutor<ToolNodeData> = async ({
         ).parts[0]?.text
       : undefined;
 
+    const provider = await getCustomModelProvider();
     const response = await generateText({
-      model: customModelProvider.getModel(node.model),
+      model: provider.getModel(node.model),
       maxSteps: 1,
       toolChoice: "required", // Force the model to call the tool
       prompt,

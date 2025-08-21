@@ -54,4 +54,5 @@ local-data
 *.ignore
 .mcp-config.json
 openai-compatible.config.ts
+logs/
 certificates
