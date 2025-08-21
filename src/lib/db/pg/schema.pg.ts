@@ -14,6 +14,7 @@ import {
   varchar,
   index,
 } from "drizzle-orm/pg-core";
+import { isNotNull } from "drizzle-orm";
 import { DBWorkflow, DBEdge, DBNode } from "app-types/workflow";
 
 export const ChatThreadSchema = pgTable("chat_thread", {
@@ -47,9 +48,36 @@ export const AgentSchema = pgTable("agent", {
     .notNull()
     .references(() => UserSchema.id),
   instructions: json("instructions").$type<Agent["instructions"]>(),
+  visibility: varchar("visibility", {
+    enum: ["public", "private", "readonly"],
+  })
+    .notNull()
+    .default("private"),
   createdAt: timestamp("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: timestamp("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
+
+export const BookmarkSchema = pgTable(
+  "bookmark",
+  {
+    id: uuid("id").primaryKey().notNull().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => UserSchema.id, { onDelete: "cascade" }),
+    itemId: uuid("item_id").notNull(),
+    itemType: varchar("item_type", {
+      enum: ["agent", "workflow"],
+    }).notNull(),
+    createdAt: timestamp("created_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    unique().on(table.userId, table.itemId, table.itemType),
+    index("bookmark_user_id_idx").on(table.userId),
+    index("bookmark_item_idx").on(table.itemId, table.itemType),
+  ],
+);
 
 export const McpServerSchema = pgTable("mcp_server", {
   id: uuid("id").primaryKey().notNull().defaultRandom(),
@@ -116,7 +144,7 @@ export const VerificationSchema = pgTable("verification", {
   ),
 });
 
-// Tool customization table for per-user additional AI instructions
+// Tool customization table for per-user additional instructions
 export const McpToolCustomizationSchema = pgTable(
   "mcp_server_tool_custom_instructions",
   {
@@ -253,13 +281,12 @@ export const McpOAuthSessionSchema = pgTable(
     id: uuid("id").primaryKey().notNull().defaultRandom(),
     mcpServerId: uuid("mcp_server_id")
       .notNull()
-      .references(() => McpServerSchema.id, { onDelete: "cascade" })
-      .unique(), // One record per MCP server
+      .references(() => McpServerSchema.id, { onDelete: "cascade" }),
     serverUrl: text("server_url").notNull(),
     clientInfo: json("client_info"),
     tokens: json("tokens"),
     codeVerifier: text("code_verifier"),
-    state: text("state"), // OAuth state parameter for current flow
+    state: text("state").unique(), // OAuth state parameter for current flow (unique for security)
     createdAt: timestamp("created_at")
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),
@@ -268,8 +295,12 @@ export const McpOAuthSessionSchema = pgTable(
       .default(sql`CURRENT_TIMESTAMP`),
   },
   (t) => [
-    index("mcp_oauth_data_server_id_idx").on(t.mcpServerId),
-    index("mcp_oauth_data_state_idx").on(t.state),
+    index("mcp_oauth_session_server_id_idx").on(t.mcpServerId),
+    index("mcp_oauth_session_state_idx").on(t.state),
+    // Partial index for sessions with tokens for better performance
+    index("mcp_oauth_session_tokens_idx")
+      .on(t.mcpServerId)
+      .where(isNotNull(t.tokens)),
   ],
 );
 
@@ -286,3 +317,4 @@ export type McpServerCustomizationEntity =
 
 export type ArchiveEntity = typeof ArchiveSchema.$inferSelect;
 export type ArchiveItemEntity = typeof ArchiveItemSchema.$inferSelect;
+export type BookmarkEntity = typeof BookmarkSchema.$inferSelect;

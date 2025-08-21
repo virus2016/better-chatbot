@@ -32,7 +32,7 @@ import { isShortcutEvent, Shortcuts } from "lib/keyboard-shortcuts";
 import { Button } from "ui/button";
 import { deleteThreadAction } from "@/app/api/chat/actions";
 import { useRouter } from "next/navigation";
-import { Loader } from "lucide-react";
+import { ArrowDown, Loader } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -47,6 +47,7 @@ import { useGenerateThreadTitle } from "@/hooks/queries/use-generate-thread-titl
 import dynamic from "next/dynamic";
 import { useMounted } from "@/hooks/use-mounted";
 import { getStorageManager } from "lib/browser-stroage";
+import { AnimatePresence, motion } from "framer-motion";
 
 type Props = {
   threadId: string;
@@ -74,6 +75,7 @@ firstTimeStorage.set(false);
 
 export default function ChatBot({ threadId, initialMessages, slots }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const [isAtBottom, setIsAtBottom] = useState(true);
 
   const [thinking, setThinking] = useState(false);
 
@@ -85,6 +87,7 @@ export default function ChatBot({ threadId, initialMessages, slots }: Props) {
     allowedMcpServers,
     threadList,
     threadMentions,
+    pendingThreadMention,
   ] = appStore(
     useShallow((state) => [
       state.mutate,
@@ -94,6 +97,7 @@ export default function ChatBot({ threadId, initialMessages, slots }: Props) {
       state.allowedMcpServers,
       state.threadList,
       state.threadMentions,
+      state.pendingThreadMention,
     ]),
   );
 
@@ -169,13 +173,6 @@ export default function ChatBot({ threadId, initialMessages, slots }: Props) {
       } else if (latestRef.current.threadList[0]?.id !== threadId) {
         mutate("/api/thread");
       }
-    },
-    onError: (error) => {
-      console.error(error);
-      toast.error(
-        truncateString(error.message, 100) ||
-          "An error occured, please try again!",
-      );
     },
   });
 
@@ -269,32 +266,58 @@ export default function ChatBot({ threadId, initialMessages, slots }: Props) {
   }, [isLoading, messages.at(-1)]);
 
   const particle = useMemo(() => {
-    if (!showParticles) return;
     return (
-      <>
-        <div className="absolute top-0 left-0 w-full h-full z-10 fade-in animate-in duration-5000">
-          <LightRays />
-        </div>
-        <div className="absolute top-0 left-0 w-full h-full z-10 fade-in animate-in duration-5000">
-          <Particles particleCount={400} particleBaseSize={10} />
-        </div>
+      <AnimatePresence>
+        {showParticles && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 5 }}
+          >
+            <div className="absolute top-0 left-0 w-full h-full z-10">
+              <LightRays />
+            </div>
+            <div className="absolute top-0 left-0 w-full h-full z-10">
+              <Particles particleCount={400} particleBaseSize={10} />
+            </div>
 
-        <div className="absolute top-0 left-0 w-full h-full z-10 fade-in animate-in duration-5000">
-          <div className="w-full h-full bg-gradient-to-t from-background to-50% to-transparent z-20" />
-        </div>
-        <div className="absolute top-0 left-0 w-full h-full z-10 fade-in animate-in duration-5000">
-          <div className="w-full h-full bg-gradient-to-l from-background to-20% to-transparent z-20" />
-        </div>
-        <div className="absolute top-0 left-0 w-full h-full z-10 fade-in animate-in duration-5000">
-          <div className="w-full h-full bg-gradient-to-r from-background to-20% to-transparent z-20" />
-        </div>
-      </>
+            <div className="absolute top-0 left-0 w-full h-full z-10">
+              <div className="w-full h-full bg-gradient-to-t from-background to-50% to-transparent z-20" />
+            </div>
+            <div className="absolute top-0 left-0 w-full h-full z-10">
+              <div className="w-full h-full bg-gradient-to-l from-background to-20% to-transparent z-20" />
+            </div>
+            <div className="absolute top-0 left-0 w-full h-full z-10">
+              <div className="w-full h-full bg-gradient-to-r from-background to-20% to-transparent z-20" />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     );
   }, [showParticles]);
 
   const handleFocus = useCallback(() => {
     setShowParticles(false);
-    debounce(() => setShowParticles(true), 30000);
+    debounce(() => setShowParticles(true), 60000);
+  }, []);
+
+  const handleScroll = useCallback(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const { scrollTop, scrollHeight, clientHeight } = container;
+    const isScrollAtBottom = scrollHeight - scrollTop - clientHeight < 50;
+
+    setIsAtBottom(isScrollAtBottom);
+    handleFocus();
+  }, [handleFocus]);
+
+  const scrollToBottom = useCallback(() => {
+    containerRef.current?.scrollTo({
+      top: containerRef.current.scrollHeight,
+      behavior: "smooth",
+    });
   }, []);
 
   useEffect(() => {
@@ -303,6 +326,18 @@ export default function ChatBot({ threadId, initialMessages, slots }: Props) {
       appStoreMutate({ currentThreadId: null });
     };
   }, [threadId]);
+
+  useEffect(() => {
+    if (pendingThreadMention && threadId) {
+      appStoreMutate((prev) => ({
+        threadMentions: {
+          ...prev.threadMentions,
+          [threadId]: [pendingThreadMention],
+        },
+        pendingThreadMention: undefined,
+      }));
+    }
+  }, [pendingThreadMention, threadId, appStoreMutate]);
 
   useEffect(() => {
     if (isInitialThreadEntry)
@@ -364,7 +399,7 @@ export default function ChatBot({ threadId, initialMessages, slots }: Props) {
             <div
               className={"flex flex-col gap-2 overflow-y-auto py-6 z-10"}
               ref={containerRef}
-              onScroll={handleFocus}
+              onScroll={handleScroll}
             >
               {messages.map((message, index) => {
                 const isLastMessage = messages.length - 1 === index;
@@ -383,7 +418,6 @@ export default function ChatBot({ threadId, initialMessages, slots }: Props) {
                         : undefined
                     }
                     isLoading={isLoading || isPendingToolCall}
-                    isError={!!error && isLastMessage}
                     isLastMessage={isLastMessage}
                     setMessages={setMessages}
                     reload={reload}
@@ -409,12 +443,21 @@ export default function ChatBot({ threadId, initialMessages, slots }: Props) {
             </div>
           </>
         )}
+
         <div
           className={clsx(
             messages.length && "absolute bottom-14",
             "w-full z-10",
           )}
         >
+          <div className="max-w-3xl mx-auto relative flex justify-center items-center -top-2">
+            <ScrollToBottomButton
+              show={!isAtBottom && messages.length > 0}
+              onClick={scrollToBottom}
+              className=""
+            />
+          </div>
+
           <PromptInput
             input={input}
             threadId={threadId}
@@ -485,5 +528,40 @@ function DeleteThreadPopup({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+interface ScrollToBottomButtonProps {
+  show: boolean;
+  onClick: () => void;
+  className?: string;
+}
+
+function ScrollToBottomButton({
+  show,
+  onClick,
+  className,
+}: ScrollToBottomButtonProps) {
+  return (
+    <AnimatePresence>
+      {show && (
+        <motion.div
+          initial={{ opacity: 0, scale: 0.8 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.8 }}
+          transition={{ duration: 0.2, ease: "easeInOut" }}
+          className={className}
+        >
+          <Button
+            onClick={onClick}
+            className="shadow-lg backdrop-blur-sm border transition-colors"
+            size="icon"
+            variant="ghost"
+          >
+            <ArrowDown />
+          </Button>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }

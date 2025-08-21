@@ -17,6 +17,7 @@ import { colorize } from "consola/utils";
 import {
   createDebounce,
   errorToString,
+  generateUUID,
   isNull,
   Locker,
   withTimeout,
@@ -33,6 +34,9 @@ type ClientOptions = {
 };
 
 const CONNET_TIMEOUT = IS_VERCEL_ENV ? 30000 : 120000;
+const MCP_MAX_TOTAL_TIMEOUT = process.env.MCP_MAX_TOTAL_TIMEOUT
+  ? parseInt(process.env.MCP_MAX_TOTAL_TIMEOUT, 10)
+  : undefined;
 
 /**
  * Client class for Model Context Protocol (MCP) server connections
@@ -45,11 +49,12 @@ export class MCPClient {
   private logger: ConsolaInstance;
   private locker = new Locker();
   private transport?: Transport;
+  private oauthProvider?: PgOAuthClientProvider;
   // Information about available tools from the server
   toolInfo: MCPToolInfo[] = [];
   private disconnectDebounce = createDebounce();
   private needOauthProvider = false;
-
+  private inProgressToolCallIds: string[] = [];
   constructor(
     private id: string,
     private name: string,
@@ -58,7 +63,10 @@ export class MCPClient {
     private options: ClientOptions = {},
   ) {
     this.logger = logger.withDefaults({
-      message: colorize("cyan", `MCP Client ${this.name}: `),
+      message: colorize(
+        "cyan",
+        `[${this.id.slice(0, 4)}] MCP Client ${this.name}: `,
+      ),
     });
   }
 
@@ -69,13 +77,22 @@ export class MCPClient {
     return "disconnected";
   }
 
+  get hasActiveToolCalls() {
+    return this.inProgressToolCallIds.length > 0;
+  }
+
   getAuthorizationUrl(): URL | undefined {
     return this.authorizationUrl;
   }
 
-  async finishAuth(code: string) {
+  async finishAuth(code: string, state: string) {
     if (!isMaybeRemoteConfig(this.serverConfig))
       throw new Error("OAuth flow requires a remote MCP server");
+
+    if (this.status != "authorizing" || this.oauthProvider?.state() != state) {
+      await this.disconnect();
+      await this.connect(state);
+    }
     const finish = (this.transport as StreamableHTTPClientTransport)
       ?.finishAuth;
 
@@ -98,13 +115,20 @@ export class MCPClient {
     };
   }
 
-  private createOAuthProvider() {
+  private createOAuthProvider(oauthState?: string) {
     if (isMaybeRemoteConfig(this.serverConfig) && this.needOauthProvider) {
       this.logger.info("Creating OAuth provider for MCP server authentication");
-      return new PgOAuthClientProvider({
+      if (this.oauthProvider) {
+        if (oauthState && oauthState != this.oauthProvider.state()) {
+          this.oauthProvider.adoptState(oauthState);
+        }
+        return this.oauthProvider;
+      }
+      this.oauthProvider = new PgOAuthClientProvider({
         name: this.name,
         mcpServerId: this.id,
         serverUrl: this.serverConfig.url,
+        state: oauthState,
         _clientMetadata: {
           client_name: `better-chatbot-${this.name}`,
           grant_types: ["authorization_code", "refresh_token"],
@@ -116,13 +140,14 @@ export class MCPClient {
           software_version: "1.0.0",
         },
         onRedirectToAuthorization: async (authorizationUrl: URL) => {
-          this.logger.warn(
+          this.logger.info(
             "OAuth authorization required - user interaction needed",
           );
           this.authorizationUrl = authorizationUrl;
           throw new OAuthAuthorizationRequiredError(authorizationUrl);
         },
       });
+      return this.oauthProvider;
     }
     return undefined;
   }
@@ -130,17 +155,21 @@ export class MCPClient {
   private scheduleAutoDisconnect() {
     if (!isNull(this.options.autoDisconnectSeconds)) {
       this.disconnectDebounce(() => {
-        this.disconnect();
+        // Don't disconnect if there are tool calls in progress
+        if (this.inProgressToolCallIds.length === 0) {
+          this.disconnect();
+        } else {
+          this.logger.info(
+            `Skipping auto-disconnect: ${this.inProgressToolCallIds.length} tool calls in progress`,
+          );
+          // Reschedule the disconnect check
+          this.scheduleAutoDisconnect();
+        }
       }, this.options.autoDisconnectSeconds * 1000);
     }
   }
 
-  /**
-   * Connect to the MCP server
-   * Do not throw Error
-   * @returns this
-   */
-  async connect() {
+  async connect(oauthState?: string): Promise<Client | undefined> {
     if (this.status === "loading") {
       await this.locker.wait();
       return this.client;
@@ -185,7 +214,12 @@ export class MCPClient {
           cwd: process.cwd(),
         });
 
-        await withTimeout(client.connect(this.transport), CONNET_TIMEOUT);
+        await withTimeout(
+          client.connect(this.transport, {
+            maxTotalTimeout: MCP_MAX_TOTAL_TIMEOUT,
+          }),
+          CONNET_TIMEOUT,
+        );
       } else if (isMaybeRemoteConfig(this.serverConfig)) {
         const config = MCPRemoteConfigZodSchema.parse(this.serverConfig);
         const abortController = new AbortController();
@@ -196,27 +230,29 @@ export class MCPClient {
               headers: config.headers,
               signal: abortController.signal,
             },
-            authProvider: this.createOAuthProvider(),
+            authProvider: this.createOAuthProvider(oauthState),
           });
-          await withTimeout(client.connect(this.transport), CONNET_TIMEOUT);
-        } catch (streamableHttpError) {
+          await withTimeout(
+            client.connect(this.transport, {
+              maxTotalTimeout: MCP_MAX_TOTAL_TIMEOUT,
+            }),
+            CONNET_TIMEOUT,
+          );
+        } catch (streamableHttpError: any) {
           // Check if it's OAuth error and we haven't tried OAuth yet
-          if (this.isOAuth(streamableHttpError) && !this.needOauthProvider) {
+          if (isUnauthorized(streamableHttpError) && !this.needOauthProvider) {
             this.logger.info(
               "OAuth authentication required, retrying with OAuth provider",
             );
             this.needOauthProvider = true;
             this.locker.unlock();
             await this.disconnect();
-            return this.connect(); // Recursive call with OAuth
+            return this.connect(oauthState); // Recursive call with OAuth
           }
 
-          const requiresOAuthAuth =
-            this.isOAuthAuthorizationRequired(streamableHttpError);
-          if (!requiresOAuthAuth) {
-            this.logger.error(streamableHttpError);
+          if (!isOAuthAuthorizationRequired(streamableHttpError)) {
             this.logger.warn(
-              "Streamable HTTP connection failed, falling back to SSE transport",
+              `Streamable HTTP connection failed, Because ${streamableHttpError.message}, falling back to SSE transport`,
             );
 
             this.transport = new SSEClientTransport(url, {
@@ -224,26 +260,29 @@ export class MCPClient {
                 headers: config.headers,
                 signal: abortController.signal,
               },
-              authProvider: this.createOAuthProvider(),
+              authProvider: this.createOAuthProvider(oauthState),
             });
-            await withTimeout(
-              client.connect(this.transport),
-              CONNET_TIMEOUT,
-            ).catch(async (sseError) => {
-              // Check if it's OAuth error and we haven't tried OAuth yet
-              if (this.isOAuth(sseError) && !this.needOauthProvider) {
+
+            try {
+              await withTimeout(
+                client.connect(this.transport, {
+                  maxTotalTimeout: MCP_MAX_TOTAL_TIMEOUT,
+                }),
+                CONNET_TIMEOUT,
+              );
+            } catch (sseError) {
+              if (isUnauthorized(sseError) && !this.needOauthProvider) {
                 this.logger.info(
                   "OAuth authentication required for SSE, retrying with OAuth provider",
                 );
                 this.needOauthProvider = true;
                 this.locker.unlock();
                 await this.disconnect();
-                return this.connect(); // Recursive call with OAuth
+                return this.connect(oauthState); // Recursive call with OAuth
               }
 
-              if (this.isOAuthAuthorizationRequired(sseError)) return;
-              throw sseError;
-            });
+              if (!isOAuthAuthorizationRequired(sseError)) throw sseError;
+            }
           }
         }
       } else {
@@ -263,11 +302,22 @@ export class MCPClient {
       this.error = errorToString(error);
       this.transport = undefined;
       throw error;
+    } finally {
+      this.locker.unlock();
     }
-    this.locker.unlock();
+
     await this.updateToolInfo();
 
     return this.client;
+  }
+
+  /**
+   * Ensure the underlying OAuth provider adopts the callback state
+   * so that PKCE code_verifier matches in multi-instance environments.
+   */
+  async ensureOAuthState(state: string): Promise<void> {
+    if (!state) return;
+    await this.oauthProvider?.adoptState(state);
   }
 
   async disconnect() {
@@ -295,6 +345,8 @@ export class MCPClient {
   }
 
   async callTool(toolName: string, input?: unknown) {
+    const id = generateUUID();
+    this.inProgressToolCallIds.push(id);
     const execute = async () => {
       const client = await this.connect();
       if (this.status === "authorizing") {
@@ -323,6 +375,11 @@ export class MCPClient {
         return v;
       })
       .ifOk(() => this.scheduleAutoDisconnect())
+      .watch(() => {
+        this.inProgressToolCallIds = this.inProgressToolCallIds.filter(
+          (toolId) => toolId !== id,
+        );
+      })
       .watch((status) => {
         if (!status.isOk) {
           this.logger.error("Tool call failed", toolName, status.error);
@@ -346,28 +403,6 @@ export class MCPClient {
       })
       .unwrap();
   }
-
-  private isOAuth(error: any): boolean {
-    return (
-      error instanceof UnauthorizedError ||
-      error?.status === 401 ||
-      error?.message?.includes("401") ||
-      error?.message?.includes("Unauthorized") ||
-      error?.message?.includes("invalid_token") ||
-      error?.message?.includes("HTTP 401")
-    );
-  }
-
-  private isOAuthAuthorizationRequired(error: any): boolean {
-    if (error instanceof OAuthAuthorizationRequiredError) {
-      return true;
-    }
-    if (this.isOAuth(error)) {
-      this.logger.error("OAuth authentication failed:", error.message);
-      throw error;
-    }
-    return false;
-  }
 }
 
 /**
@@ -385,4 +420,19 @@ class OAuthAuthorizationRequiredError extends Error {
     super("OAuth user authorization required");
     this.name = "OAuthAuthorizationRequiredError";
   }
+}
+
+function isUnauthorized(error: any): boolean {
+  return (
+    error instanceof UnauthorizedError ||
+    error?.status === 401 ||
+    error?.message?.includes("401") ||
+    error?.message?.includes("Unauthorized") ||
+    error?.message?.includes("invalid_token") ||
+    error?.message?.includes("HTTP 401")
+  );
+}
+
+function isOAuthAuthorizationRequired(error: any): boolean {
+  return error instanceof OAuthAuthorizationRequiredError;
 }
