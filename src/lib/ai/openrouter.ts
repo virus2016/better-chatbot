@@ -1,8 +1,6 @@
 // src/lib/ai/openrouter.ts
 
-import { LanguageModel } from "ai";
 import logger from "logger";
-import { ChatModel } from "app-types/chat";
 
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/models";
 const CACHE_TTL_MS = 1000 * 60 * 10; // 10 minutes

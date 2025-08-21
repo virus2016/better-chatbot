@@ -15,10 +15,6 @@ import { getOpenRouterProviderConfig } from "./openrouter";
 import { getOllamaProviderConfig } from "./ollama";
 import { getOpenAIProviderConfig } from "./openai";
 
-const _ollama = createOllama({
-  baseURL: process.env.OLLAMA_BASE_URL || "http://localhost:11434/api",
-});
-
 const staticModels = {
   openai: {
     "gpt-4.1": openai("gpt-4.1"),

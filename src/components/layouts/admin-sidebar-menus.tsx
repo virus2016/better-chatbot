@@ -8,14 +8,7 @@ import { SidebarGroup } from "ui/sidebar";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-import {
-  BarChart3,
-  Users,
-  Settings,
-  Shield,
-  Database,
-  Activity,
-} from "lucide-react";
+import { BarChart3, Users, Shield, Database, Activity } from "lucide-react";
 
 export function AdminSidebarMenus() {
   const router = useRouter();

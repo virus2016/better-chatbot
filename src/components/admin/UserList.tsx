@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import useSWR from "swr";
 import { fetcher } from "lib/utils";
 import { UserCard } from "./UserCard";
@@ -23,16 +23,7 @@ import {
 } from "ui/table";
 import { Badge } from "ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "ui/avatar";
-import {
-  Search,
-  Filter,
-  Grid,
-  List,
-  CheckCircle,
-  XCircle,
-  Calendar,
-  Mail,
-} from "lucide-react";
+import { Search, Filter, Grid, List, CheckCircle, XCircle } from "lucide-react";
 import type { UserEntity } from "@/lib/db/pg/schema.pg";
 import { formatDistanceToNow } from "date-fns";
 

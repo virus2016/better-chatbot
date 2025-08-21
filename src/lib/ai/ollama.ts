@@ -1,9 +1,6 @@
 // src/lib/ai/ollama.ts
 
-import { LanguageModel } from "ai";
 import logger from "logger";
-import { ChatModel } from "app-types/chat";
-import { createOllama } from "ollama-ai-provider";
 
 const CACHE_TTL_MS = 1000 * 60 * 10; // 10 minutes
 
